@@ -86,8 +86,17 @@ public final class CoolBeans: @unchecked Sendable {
 				code: "product_mismatch",
 				message: "That licence is for a different product.")
 		}
-		storage.set(StorageKey.instance, payload.instance.id)
-		storage.set(StorageKey.license, licenseKey)
+		// The seat is already spent server-side, so a storage failure has to be visible here.
+		// Reporting success would leave the app "activated" until it quits, then re-activate
+		// on the next launch and take another seat, over and over until the licence is used up.
+		guard storage.set(StorageKey.instance, payload.instance.id),
+			storage.set(StorageKey.license, licenseKey)
+		else {
+			throw CoolBeansError(
+				status: 0,
+				code: "storage_failed",
+				message: "Your licence could not be saved on this device. Check Keychain access and try again.")
+		}
 		return ActivateResult(license: payload.license, instance: payload.instance)
 	}
 

@@ -5,7 +5,11 @@ import Foundation
 
 public protocol CoolBeansStorage: AnyObject, Sendable {
 	func get(_ key: String) -> String?
-	func set(_ key: String, _ value: String)
+	/// Reports whether the value was actually stored. The Keychain refuses writes for
+	/// reasons the caller cannot predict, and an activation that cannot be persisted has
+	/// to fail rather than look successful until the next launch.
+	@discardableResult
+	func set(_ key: String, _ value: String) -> Bool
 	func remove(_ key: String)
 }
 
@@ -23,10 +27,12 @@ public final class InMemoryStorage: CoolBeansStorage, @unchecked Sendable {
 		return values[key]
 	}
 
-	public func set(_ key: String, _ value: String) {
+	@discardableResult
+	public func set(_ key: String, _ value: String) -> Bool {
 		lock.lock()
 		defer { lock.unlock() }
 		values[key] = value
+		return true
 	}
 
 	public func remove(_ key: String) {

@@ -115,3 +115,59 @@ final class CredentialPersistenceTests: XCTestCase {
 		XCTAssertNil(cb.licenseKey)
 	}
 }
+
+/// Storage that reports every write as failed, the way the Keychain does when it refuses
+/// an item. Nothing else in the suite can reach that path: `InMemoryStorage` always succeeds.
+final class RefusingStorage: CoolBeansStorage, @unchecked Sendable {
+	// Reads still work, which is what a Keychain that refuses an add actually looks like.
+	// It also keeps the device id stable, so these tests fail on the write and not on a
+	// fingerprint that changed between two calls.
+	func get(_ key: String) -> String? { key == StorageKey.device ? "MACHINE-A" : nil }
+	func set(_ key: String, _ value: String) -> Bool { false }
+	func remove(_ key: String) {}
+}
+
+final class StorageFailureTests: XCTestCase {
+	func testActivationFailsLoudlyWhenTheCredentialCannotBeStored() async throws {
+		// A silent failure here is the worst kind: the server has spent a seat, the UI says
+		// "activated", and the credential is gone the moment the app quits. The user then
+		// re-activates and burns another seat, every launch, until the licence is exhausted.
+		let cb = CoolBeans(
+			configuration: .init(product: "clementine"),
+			storage: RefusingStorage(),
+			transport: StubTransport { _, _ in
+				(
+					200,
+					#"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#
+				)
+			})
+		do {
+			_ = try await cb.activate(licenseKey: "K")
+			XCTFail("activation must not report success it cannot persist")
+		} catch let error as CoolBeansError {
+			XCTAssertEqual(error.code, "storage_failed")
+		}
+	}
+
+	func testImportingAnActivationFailsLoudlyWhenItCannotBeStored() async throws {
+		let store = RefusingStorage()
+		let probe = CoolBeans(
+			configuration: .init(product: "clementine"),
+			storage: store,
+			transport: StubTransport { _, _ in (-1, "") })
+		// Bind to the fingerprint this machine actually reports, so the import gets past
+		// the device check and fails on the write, which is what is under test.
+		let signed = try TestSigner.sign(
+			.init(exp: Date().addingTimeInterval(86_400), fingerprint: probe.fingerprint()))
+		let cb = CoolBeans(
+			configuration: .init(product: "clementine", publicKeys: signed.keys),
+			storage: store,
+			transport: StubTransport { _, _ in (-1, "") })
+		do {
+			try await cb.importActivation(signed.token)
+			XCTFail("import must not report success it cannot persist")
+		} catch let error as CoolBeansError {
+			XCTAssertEqual(error.code, "storage_failed")
+		}
+	}
+}

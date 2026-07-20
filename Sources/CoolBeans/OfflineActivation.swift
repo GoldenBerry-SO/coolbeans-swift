@@ -49,8 +49,14 @@ extension CoolBeans {
 		}
 		// Bind the device before storing the token, so the instance check in offlineState
 		// has something to compare against rather than silently passing.
-		storage.set(StorageKey.instance, payload.instanceId)
-		storage.set(StorageKey.token, token)
+		guard storage.set(StorageKey.instance, payload.instanceId),
+			storage.set(StorageKey.token, token)
+		else {
+			throw CoolBeansError(
+				status: 0,
+				code: "storage_failed",
+				message: "That activation could not be saved on this device. Check Keychain access and try again.")
+		}
 		acceptTrustedTime(from: payload)
 	}
 
