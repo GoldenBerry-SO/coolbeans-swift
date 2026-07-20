@@ -76,6 +76,7 @@ extension CoolBeans {
 		// Believing we still hold a seat we have released is worse than forgetting one.
 		storage.remove(StorageKey.instance)
 		storage.remove(StorageKey.token)
+		storage.remove(StorageKey.license)
 	}
 
 	/// Renew a floating lease. Returns the new expiry, or nil when nothing was renewed —

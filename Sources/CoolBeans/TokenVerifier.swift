@@ -15,6 +15,8 @@ struct TokenPayload: Decodable {
 	let tier: String
 	let product: String
 	let expiresAt: String?
+	/// Present only on an offline activation: the machine it was minted for.
+	let fingerprint: String?
 	let instanceId: String
 	let iat: Int
 	let exp: Int
@@ -22,6 +24,7 @@ struct TokenPayload: Decodable {
 	enum CodingKeys: String, CodingKey {
 		case key, status, tier, product, iat, exp
 		case expiresAt = "expires_at"
+		case fingerprint
 		case instanceId = "instance_id"
 	}
 }

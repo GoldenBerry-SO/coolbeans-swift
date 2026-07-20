@@ -41,5 +41,6 @@ enum StorageKey {
 	static let token = "coolbeans.token"
 	static let instance = "coolbeans.instance_id"
 	static let keys = "coolbeans.pubkeys"
+	static let license = "coolbeans.license_key"
 	static let watermark = "coolbeans.trusted_time"
 }

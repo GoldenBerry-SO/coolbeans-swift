@@ -44,20 +44,26 @@ public final class KeychainStorage: CoolBeansStorage, @unchecked Sendable {
 		return String(data: data, encoding: .utf8)
 	}
 
-	public func set(_ key: String, _ value: String) {
+	@discardableResult
+	public func set(_ key: String, _ value: String) -> Bool {
 		let data = Data(value.utf8)
 		let q = query(key)
 		// Update in place when present, so we never briefly delete a credential and leave
 		// a window where a crash loses it.
 		let updated = SecItemUpdate(q as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-		if updated == errSecItemNotFound {
-			var insert = q
-			insert[kSecValueData as String] = data
-			// Available after first unlock so a background launch can still read it, but
-			// never migrated to another device by a backup restore.
-			insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-			SecItemAdd(insert as CFDictionary, nil)
-		}
+		if updated == errSecSuccess { return true }
+		guard updated == errSecItemNotFound else { return false }
+
+		var insert = q
+		insert[kSecValueData as String] = data
+		// Keychain refuses a ThisDeviceOnly accessibility class on a synchronizable item,
+		// and SecItemAdd then fails for every write — so with iCloud sync on, nothing
+		// would persist at all and activation state would vanish on relaunch.
+		insert[kSecAttrAccessible as String] =
+			synchronizable
+			? kSecAttrAccessibleAfterFirstUnlock
+			: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+		return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
 	}
 
 	public func remove(_ key: String) {

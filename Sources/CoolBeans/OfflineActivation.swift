@@ -33,6 +33,20 @@ extension CoolBeans {
 				status: 0, code: "activation_expired",
 				message: "That activation has expired. Ask for a fresh one.")
 		}
+		// The binding check, and the whole reason a blob can be handed around as text.
+		// Comparing against the token's own instance_id would be circular — we are about
+		// to store that value ourselves — so the signed fingerprint is the only claim that
+		// says anything about *this* machine.
+		guard let boundTo = payload.fingerprint else {
+			throw CoolBeansError(
+				status: 0, code: "unbound_activation",
+				message: "That activation is not bound to a machine. Ask for one issued for this device.")
+		}
+		guard boundTo == fingerprint() else {
+			throw CoolBeansError(
+				status: 0, code: "wrong_device",
+				message: "That activation was issued for a different machine.")
+		}
 		// Bind the device before storing the token, so the instance check in offlineState
 		// has something to compare against rather than silently passing.
 		storage.set(StorageKey.instance, payload.instanceId)

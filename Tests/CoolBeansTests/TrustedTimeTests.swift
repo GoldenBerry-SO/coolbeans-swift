@@ -144,8 +144,15 @@ final class WatermarkWiringTests: XCTestCase {
 
 	func testImportingAnOfflineActivationAlsoAdvancesIt() async throws {
 		let issued = Date(timeIntervalSince1970: 1_700_000_000)
-		let signed = try TestSigner.sign(.init(exp: Date().addingTimeInterval(86_400)))
 		let store = InMemoryStorage()
+		store.set(StorageKey.device, "THIS-MACHINE")
+		let probe = CoolBeans(
+			configuration: .init(product: "clementine"),
+			storage: store,
+			transport: StubTransport { _, _ in (-1, "") })
+		// The blob must be minted for this machine, or the binding check refuses it.
+		let signed = try TestSigner.sign(
+			.init(exp: Date().addingTimeInterval(86_400), fingerprint: probe.fingerprint()))
 		let cb = CoolBeans(
 			configuration: .init(product: "clementine", publicKeys: signed.keys),
 			storage: store,

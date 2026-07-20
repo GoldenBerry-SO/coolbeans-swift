@@ -77,7 +77,10 @@ public final class LicenseGate {
 		let offline = await client.offlineState()
 		status = Self.map(offline)
 
-		guard let licenseKey, let instanceId = client.instanceId else { return }
+		// Fall back to the stored credential: an app relaunching has no key in hand, and
+		// without this refresh() stops short of the server for the life of the install.
+		guard let licenseKey = licenseKey ?? client.licenseKey, let instanceId = client.instanceId
+		else { return }
 		guard let result = try? await client.verify(licenseKey: licenseKey, instanceId: instanceId)
 		else { return }
 
@@ -107,9 +110,10 @@ public final class LicenseGate {
 	}
 
 	/// Free this device's seat and lock the app.
-	public func deactivate(licenseKey: String) async {
-		if let instanceId = client.instanceId {
-			try? await client.deactivate(licenseKey: licenseKey, instanceId: instanceId)
+	public func deactivate(licenseKey: String? = nil) async {
+		let key = licenseKey ?? client.licenseKey
+		if let key, let instanceId = client.instanceId {
+			try? await client.deactivate(licenseKey: key, instanceId: instanceId)
 		}
 		status = .locked
 	}

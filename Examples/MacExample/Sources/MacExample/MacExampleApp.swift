@@ -59,8 +59,10 @@ struct ContentView: View {
 					.foregroundStyle(.secondary)
 			}
 
+			// No key argument: after a relaunch the text field is empty, and the stored
+			// credential is the only one that exists.
 			Button("Deactivate this Mac") {
-				Task { await gate.deactivate(licenseKey: key) }
+				Task { await gate.deactivate() }
 			}
 			.padding(.top, 8)
 		}

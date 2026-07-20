@@ -19,6 +19,7 @@ enum TestSigner {
 		var instanceId = "inst-1"
 		var expiresAt: Date?
 		var exp: Date
+		var fingerprint: String?
 		var iat = Date(timeIntervalSince1970: 1_700_000_000)
 
 		init(
@@ -28,7 +29,8 @@ enum TestSigner {
 			product: String = "clementine",
 			instanceId: String = "inst-1",
 			exp: Date,
-			expiresAt: Date? = nil
+			expiresAt: Date? = nil,
+			fingerprint: String? = nil
 		) {
 			self.key = key
 			self.status = status
@@ -37,6 +39,7 @@ enum TestSigner {
 			self.instanceId = instanceId
 			self.exp = exp
 			self.expiresAt = expiresAt
+			self.fingerprint = fingerprint
 		}
 	}
 
@@ -53,6 +56,7 @@ enum TestSigner {
 			"exp": Int(claims.exp.timeIntervalSince1970),
 		]
 		payload["expires_at"] = claims.expiresAt.map { formatter.string(from: $0) } ?? NSNull()
+		if let fingerprint = claims.fingerprint { payload["fingerprint"] = fingerprint }
 
 		let header = try JSONSerialization.data(
 			withJSONObject: ["alg": "EdDSA", "typ": "CBT", "kid": kid])

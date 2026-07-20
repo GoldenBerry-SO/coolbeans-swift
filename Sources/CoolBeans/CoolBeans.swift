@@ -52,6 +52,13 @@ public final class CoolBeans: @unchecked Sendable {
 	/// The instance id from the last successful activation on this device.
 	public var instanceId: String? { storage.get(StorageKey.instance) }
 
+	/// The licence key this device activated with.
+	///
+	/// Persisted because everything after activation needs it: the next launch has to
+	/// verify, and without a stored key that call never reaches the server, so revocation
+	/// and token refresh quietly stop for the life of the install.
+	public var licenseKey: String? { storage.get(StorageKey.license) }
+
 	/// Activate this device against a licence. Fails closed if the server answers for a
 	/// different product than the one configured.
 	public func activate(licenseKey: String, name: String? = nil) async throws -> ActivateResult {
@@ -80,6 +87,7 @@ public final class CoolBeans: @unchecked Sendable {
 				message: "That licence is for a different product.")
 		}
 		storage.set(StorageKey.instance, payload.instance.id)
+		storage.set(StorageKey.license, licenseKey)
 		return ActivateResult(license: payload.license, instance: payload.instance)
 	}
 

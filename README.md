@@ -15,7 +15,8 @@ let cb = CoolBeans(configuration: .init(
   publicKeys: ["1": "BASE64_PUBLIC_KEY"]   // embed these at build time
 ))
 
-// Once, when the user pastes their key
+// Once, when the user pastes their key. The key is stored, so later launches can
+// verify without you holding on to it.
 let result = try await cb.activate(licenseKey: key, name: "Chris's MacBook")
 
 // On every launch — instant, no network
@@ -98,8 +99,12 @@ sends it over, an operator generates a blob in the console, and it comes back by
 try await cb.importActivation(pastedBlob)
 ```
 
-Verified against your embedded keys, checked for product and expiry, and bound to this
-device. After that `offlineState()` behaves exactly as after a normal activation.
+Verified against your embedded keys, checked for product and expiry, and **bound to this
+machine by a signed fingerprint claim** — a blob minted for one Mac is refused on another.
+After that `offlineState()` behaves exactly as after a normal activation.
+
+Offline activation needs a **node-locked** product. A floating seat is held by a lease the
+machine renews, which an offline machine can never do, so the server refuses to mint one.
 
 **An air-gapped machine cannot be revoked before its token expires.** That is inherent to
 licensing something you cannot reach, not a defect. The token TTL is the dial.
