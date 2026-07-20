@@ -33,3 +33,8 @@ jobs:
           xcodebuild -scheme CoolBeans \
             -destination 'generic/platform=iOS Simulator' \
             -skipPackagePluginValidation build
+      - name: Build the SwiftUI example
+        # SwiftUI and AppKit exist nowhere else, so this is the only place the example app
+        # is ever compiled. Without it the example would rot silently.
+        working-directory: Examples/MacExample
+        run: swift build

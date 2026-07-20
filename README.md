@@ -127,7 +127,20 @@ catch let error as CoolBeansError {
 This targets **direct distribution** — notarised, outside the App Store. On the App Store
 Apple owns purchase and receipt validation and you would not use this for those builds.
 
-## Running the example
+## Examples
+
+**`Examples/MacExample`** is a licence-gated SwiftUI app for macOS — key entry, activation,
+gated content, the offline state shown honestly, and the device fingerprint an operator
+needs for an air-gapped activation. It is the thing to copy.
+
+All of its decisions live in `LicenseGate`, which is plain Swift and covered by tests. The
+SwiftUI file is presentation only. Logic that lives in a view is logic nobody can test.
+
+```bash
+cd Examples/MacExample && swift build
+```
+
+**`coolbeans-example`** is a headless executable that runs anywhere, including Linux CI:
 
 ```bash
 COOLBEANS_URL=http://localhost:3000 COOLBEANS_PRODUCT=clementine \

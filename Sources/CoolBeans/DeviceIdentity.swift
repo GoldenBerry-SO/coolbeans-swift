@@ -32,7 +32,16 @@ private func hardwareIdentifier() -> String? {
 	#if os(macOS) && canImport(IOKit)
 	// IOPlatformUUID is stable for the life of the machine and survives OS reinstalls.
 	let matching = IOServiceMatching("IOPlatformExpertDevice")
-	let service = IOServiceGetMatchingService(kIOMainPortDefault, matching)
+	// kIOMainPortDefault is macOS 12+. The package targets macOS 11, so the older spelling
+	// is still needed there — caught by the macOS CI job, which is the only place this
+	// file compiles at all.
+	let port: mach_port_t
+	if #available(macOS 12.0, *) {
+		port = kIOMainPortDefault
+	} else {
+		port = kIOMasterPortDefault
+	}
+	let service = IOServiceGetMatchingService(port, matching)
 	guard service != 0 else { return nil }
 	defer { IOObjectRelease(service) }
 	let key = kIOPlatformUUIDKey as CFString
