@@ -1,8 +1,28 @@
 // ABOUTME: Findings from the Codex review — device binding and credential persistence.
 // ABOUTME: Both were the difference between a feature working and only appearing to.
 
+import Foundation
 import XCTest
+
 @testable import CoolBeans
+
+/// Counts calls from inside a transport stub, which is a Sendable closure.
+final class CallCounter: @unchecked Sendable {
+	private let lock = NSLock()
+	private var value = 0
+
+	var count: Int {
+		lock.lock()
+		defer { lock.unlock() }
+		return value
+	}
+
+	func bump() {
+		lock.lock()
+		defer { lock.unlock() }
+		value += 1
+	}
+}
 
 final class OfflineBindingTests: XCTestCase {
 	func testACopiedActivationCannotUnlockAnotherMachine() async throws {
@@ -87,18 +107,20 @@ final class CredentialPersistenceTests: XCTestCase {
 		let store = InMemoryStorage()
 		store.set(StorageKey.instance, "inst-1")
 		store.set(StorageKey.license, "CLEM-A2B3-C4D5-E6F7-G8H9")
-		var validateCalls = 0
+		// A plain captured var is a data race inside a Sendable closure, and Swift 6.3
+		// rejects it outright even though the 6.0 toolchain on the Linux job lets it pass.
+		let validateCalls = CallCounter()
 		let cb = CoolBeans(
 			configuration: .init(product: "clementine"),
 			storage: store,
 			transport: StubTransport { path, _ in
-				if path == "/v1/validate" { validateCalls += 1 }
+				if path == "/v1/validate" { validateCalls.bump() }
 				if path == "/v1/pubkey" { return (200, #"{"ok":true,"keys":{}}"#) }
 				return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","tier":"yearly","product":"clementine","expires_at":null}}"#)
 			})
 		let gate = LicenseGate(client: cb)
 		await gate.refresh()
-		XCTAssertEqual(validateCalls, 1)
+		XCTAssertEqual(validateCalls.count, 1)
 		// And a revocation that arrives this way actually locks the app.
 		XCTAssertEqual(gate.status, .revoked)
 	}
