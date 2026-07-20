@@ -20,7 +20,9 @@ final class LicenseGateTests: XCTestCase {
 		return LicenseGate(client: cb)
 	}
 
-	func testExposesTheDeviceFingerprintForAirGappedActivation() {
+	// async on purpose: on Linux, SwiftPM's generated test discovery calls from a
+	// synchronous nonisolated context, which cannot reach a synchronous @MainActor method.
+	func testExposesTheDeviceFingerprintForAirGappedActivation() async {
 		// The example app shows this so an operator can mint an offline activation from it.
 		let g = gate(token: nil, keys: [:]) { _, _ in (-1, "") }
 		XCTAssertFalse(g.deviceFingerprint.isEmpty)
