@@ -20,6 +20,12 @@ final class LicenseGateTests: XCTestCase {
 		return LicenseGate(client: cb)
 	}
 
+	func testExposesTheDeviceFingerprintForAirGappedActivation() {
+		// The example app shows this so an operator can mint an offline activation from it.
+		let g = gate(token: nil, keys: [:]) { _, _ in (-1, "") }
+		XCTAssertFalse(g.deviceFingerprint.isEmpty)
+	}
+
 	func testStartsLockedWithNothingStored() async {
 		let g = gate(token: nil, keys: [:]) { _, _ in (-1, "") }
 		await g.refresh()
@@ -80,13 +86,5 @@ final class LicenseGateTests: XCTestCase {
 		let error = g.lastError
 		XCTAssertEqual(error?.code, "activation_limit_reached")
 		XCTAssertTrue(error?.message.contains("already active on 3") ?? false)
-	}
-}
-
-extension LicenseGateTests {
-	func testExposesTheDeviceFingerprintForAirGappedActivation() {
-		// The example app shows this so an operator can mint an offline activation from it.
-		let g = gate(token: nil, keys: [:]) { _, _ in (-1, "") }
-		XCTAssertFalse(g.deviceFingerprint.isEmpty)
 	}
 }

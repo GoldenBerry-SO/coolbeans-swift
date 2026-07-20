@@ -25,7 +25,6 @@ struct MacExampleApp: App {
 				// network call is how an app comes to feel broken on a bad connection.
 				.task { await gate.refresh() }
 		}
-		.windowResizability(.contentSize)
 	}
 }
 
