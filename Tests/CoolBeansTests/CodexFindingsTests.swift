@@ -142,8 +142,8 @@ final class CredentialPersistenceTests: XCTestCase {
 /// an item. Nothing else in the suite can reach that path: `InMemoryStorage` always succeeds.
 final class RefusingStorage: CoolBeansStorage, @unchecked Sendable {
 	// Reads still work, which is what a Keychain that refuses an add actually looks like.
-	// It also keeps the device id stable, so these tests fail on the write and not on a
-	// fingerprint that changed between two calls.
+	// Serving a device id keeps the fingerprint the same across two clients built on this
+	// store, so these tests fail on the write rather than on a device check.
 	func get(_ key: String) -> String? { key == StorageKey.device ? "MACHINE-A" : nil }
 	func set(_ key: String, _ value: String) -> Bool { false }
 	func remove(_ key: String) {}
@@ -191,5 +191,113 @@ final class StorageFailureTests: XCTestCase {
 		} catch let error as CoolBeansError {
 			XCTAssertEqual(error.code, "storage_failed")
 		}
+	}
+}
+
+/// Storage that refuses writes to one key and serves the rest normally, the way the
+/// Keychain can reject a single item while the store keeps working.
+final class RefusingOneKeyStorage: CoolBeansStorage, @unchecked Sendable {
+	private let inner = InMemoryStorage()
+	private let refused: String
+
+	init(refusing: String) { self.refused = refusing }
+
+	/// Write past the refusal, to set up state the machine already had.
+	func seed(_ key: String, _ value: String) { inner.set(key, value) }
+
+	func get(_ key: String) -> String? { inner.get(key) }
+	func set(_ key: String, _ value: String) -> Bool {
+		key == refused ? false : inner.set(key, value)
+	}
+	func remove(_ key: String) { inner.remove(key) }
+}
+
+final class PartialWriteTests: XCTestCase {
+	/// A machine with a working activation, and a storage that will refuse one key.
+	private func machineWithAWorkingActivation(refusing: String) throws -> (
+		cb: CoolBeans, store: RefusingOneKeyStorage, newToken: String
+	) {
+		let store = RefusingOneKeyStorage(refusing: refusing)
+		// Resolve the fingerprint through the same storage, so this reads the hardware id on
+		// a Mac and the persisted one elsewhere rather than assuming either.
+		let probe = CoolBeans(
+			configuration: .init(product: "clementine"),
+			storage: store,
+			transport: StubTransport { _, _ in (-1, "") })
+		let device = probe.fingerprint()
+
+		let old = try TestSigner.sign(
+			.init(
+				instanceId: "inst-old", exp: Date().addingTimeInterval(86_400), fingerprint: device),
+			kid: "1")
+		let new = try TestSigner.sign(
+			.init(
+				instanceId: "inst-new", exp: Date().addingTimeInterval(86_400), fingerprint: device),
+			kid: "2")
+		store.seed(StorageKey.token, old.token)
+		store.seed(StorageKey.instance, "inst-old")
+
+		let cb = CoolBeans(
+			configuration: .init(
+				product: "clementine", publicKeys: old.keys.merging(new.keys) { a, _ in a }),
+			storage: store,
+			transport: StubTransport { _, _ in
+				(
+					200,
+					#"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"instance":{"id":"inst-new","name":"Mac"}}"#
+				)
+			})
+		return (cb, store, new.token)
+	}
+
+	func testAFailedImportLeavesTheWorkingActivationAlone() async throws {
+		// Half a write is worse than none. The instance id lands, the token does not, and
+		// offlineState then sees the old token bound to an instance it no longer matches
+		// and locks the app — taking away access the machine already had, on a machine
+		// that by definition cannot call us to get it back.
+		let (cb, store, newToken) = try machineWithAWorkingActivation(refusing: StorageKey.token)
+		do {
+			try await cb.importActivation(newToken)
+			XCTFail("import must not report success it cannot persist")
+		} catch let error as CoolBeansError {
+			XCTAssertEqual(error.code, "storage_failed")
+		}
+		XCTAssertEqual(store.get(StorageKey.instance), "inst-old")
+		let state = await cb.offlineState()
+		XCTAssertEqual(state, .valid)
+	}
+
+	func testAFailedActivationLeavesTheWorkingActivationAlone() async throws {
+		let (cb, store, _) = try machineWithAWorkingActivation(refusing: StorageKey.license)
+		do {
+			_ = try await cb.activate(licenseKey: "K")
+			XCTFail("activation must not report success it cannot persist")
+		} catch let error as CoolBeansError {
+			XCTAssertEqual(error.code, "storage_failed")
+		}
+		XCTAssertEqual(store.get(StorageKey.instance), "inst-old")
+		let state = await cb.offlineState()
+		XCTAssertEqual(state, .valid)
+	}
+}
+
+/// Storage that forgets everything: reads find nothing, writes do not stick.
+final class AmnesiacStorage: CoolBeansStorage, @unchecked Sendable {
+	func get(_ key: String) -> String? { nil }
+	func set(_ key: String, _ value: String) -> Bool { false }
+	func remove(_ key: String) {}
+}
+
+final class FingerprintStabilityTests: XCTestCase {
+	func testTheFingerprintDoesNotChangeBetweenCalls() {
+		// The portable fallback mints a UUID and persists it. When the store cannot keep it,
+		// every call used to mint a new one, so the fingerprint a user copied out of the UI
+		// was not the one checked at import — a permanent "issued for a different machine"
+		// on a machine that cannot call us to sort it out.
+		let cb = CoolBeans(
+			configuration: .init(product: "clementine"),
+			storage: AmnesiacStorage(),
+			transport: StubTransport { _, _ in (-1, "") })
+		XCTAssertEqual(cb.fingerprint(), cb.fingerprint())
 	}
 }

@@ -42,6 +42,33 @@ public final class InMemoryStorage: CoolBeansStorage, @unchecked Sendable {
 	}
 }
 
+extension CoolBeansStorage {
+	/// Write several values together, putting back what was there if any of them fails.
+	///
+	/// Half a credential is worse than none. `offlineState` locks the app when the cached
+	/// token and the stored instance id disagree, so a write that left a new instance id
+	/// beside an old token would take away access the machine already had — and on an
+	/// air-gapped machine there is no way to get it back.
+	///
+	/// Best effort, not a transaction: the rollback writes can fail too, on a store that is
+	/// already refusing them. It is still strictly better than leaving the mismatch, and the
+	/// caller fails loudly either way.
+	func setAll(_ pairs: [(key: String, value: String)]) -> Bool {
+		var undo: [(key: String, previous: String?)] = []
+		for pair in pairs {
+			let previous = get(pair.key)
+			guard set(pair.key, pair.value) else {
+				for step in undo.reversed() {
+					if let value = step.previous { set(step.key, value) } else { remove(step.key) }
+				}
+				return false
+			}
+			undo.append((pair.key, previous))
+		}
+		return true
+	}
+}
+
 enum StorageKey {
 	static let device = "coolbeans.device_id"
 	static let token = "coolbeans.token"

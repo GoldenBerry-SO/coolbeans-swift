@@ -49,8 +49,11 @@ extension CoolBeans {
 		}
 		// Bind the device before storing the token, so the instance check in offlineState
 		// has something to compare against rather than silently passing.
-		guard storage.set(StorageKey.instance, payload.instanceId),
-			storage.set(StorageKey.token, token)
+		guard
+			storage.setAll([
+				(StorageKey.instance, payload.instanceId),
+				(StorageKey.token, token),
+			])
 		else {
 			throw CoolBeansError(
 				status: 0,

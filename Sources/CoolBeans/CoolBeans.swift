@@ -31,6 +31,8 @@ public final class CoolBeans: @unchecked Sendable {
 	let storage: CoolBeansStorage
 	let transport: CoolBeansTransport
 	private let clock: @Sendable () -> Date
+	private let deviceLock = NSLock()
+	private var resolvedFingerprint: String?
 
 	public init(
 		configuration: Configuration,
@@ -45,8 +47,20 @@ public final class CoolBeans: @unchecked Sendable {
 	}
 
 	/// A stable id for this machine, hardware-derived where the platform offers one.
+	///
+	/// Resolved once per client. The portable fallback mints a UUID and persists it, so a
+	/// store that cannot keep it would hand out a different id on every call — and the
+	/// air-gapped flow depends on this being one value: the user copies it out of the UI for
+	/// the vendor to bind the blob to, and the import checks the blob against it. Two
+	/// different answers there is a permanent `wrong_device` on a machine that cannot reach
+	/// us to sort it out.
 	public func fingerprint() -> String {
-		resolveDeviceIdentifier(storage: storage)
+		deviceLock.lock()
+		defer { deviceLock.unlock() }
+		if let resolvedFingerprint { return resolvedFingerprint }
+		let resolved = resolveDeviceIdentifier(storage: storage)
+		resolvedFingerprint = resolved
+		return resolved
 	}
 
 	/// The instance id from the last successful activation on this device.
@@ -89,8 +103,11 @@ public final class CoolBeans: @unchecked Sendable {
 		// The seat is already spent server-side, so a storage failure has to be visible here.
 		// Reporting success would leave the app "activated" until it quits, then re-activate
 		// on the next launch and take another seat, over and over until the licence is used up.
-		guard storage.set(StorageKey.instance, payload.instance.id),
-			storage.set(StorageKey.license, licenseKey)
+		guard
+			storage.setAll([
+				(StorageKey.instance, payload.instance.id),
+				(StorageKey.license, licenseKey),
+			])
 		else {
 			throw CoolBeansError(
 				status: 0,
