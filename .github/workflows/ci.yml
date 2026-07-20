@@ -1,0 +1,35 @@
+# ABOUTME: Build and test on every push (issue #1).
+# ABOUTME: Linux runs the full suite; macOS proves the Apple-only shims actually compile.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Test on Linux
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+  apple:
+    # The Keychain and IOKit shims compile only here, so Linux alone would let them rot.
+    name: Build for macOS and iOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for macOS
+        run: swift build
+      - name: Test on macOS
+        run: swift test
+      - name: Build for iOS
+        run: |
+          xcodebuild -scheme CoolBeans \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation build
