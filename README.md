@@ -89,6 +89,23 @@ CoolBeans(configuration: .init(product: "clementine", syncsViaICloud: true))
 On means "it already works on my laptop". Off means each machine activates separately and
 takes its own seat. Neither is wrong — pick on purpose. Default is off.
 
+### Supplying your own storage
+
+`CoolBeansStorage` has three requirements, and `set` returns whether the value actually
+landed:
+
+```swift
+func get(_ key: String) -> String?
+@discardableResult func set(_ key: String, _ value: String) -> Bool
+func remove(_ key: String)
+```
+
+Return `false` when a write fails rather than swallowing it. Activation spends a seat on
+the server before anything is stored, so a write that quietly fails leaves the app looking
+activated until it quits, then activating again on the next launch and taking another seat
+every time. `activate` and `importActivation` turn a `false` into a thrown
+`storage_failed`, which is the only way a user finds out in time to fix it.
+
 ## Offline activation (air-gapped machines)
 
 A machine that has never had internet cannot activate normally, because activation is a
