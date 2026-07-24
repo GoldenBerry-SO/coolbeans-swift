@@ -12,7 +12,8 @@ import Crypto
 struct TokenPayload: Decodable {
 	let key: String
 	let status: String
-	let tier: String
+	let kind: String
+	let plan: String?
 	let product: String
 	let expiresAt: String?
 	/// Present only on an offline activation: the machine it was minted for.
@@ -22,7 +23,7 @@ struct TokenPayload: Decodable {
 	let exp: Int
 
 	enum CodingKeys: String, CodingKey {
-		case key, status, tier, product, iat, exp
+		case key, status, kind, plan, product, iat, exp
 		case expiresAt = "expires_at"
 		case fingerprint
 		case instanceId = "instance_id"

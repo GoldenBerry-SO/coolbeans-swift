@@ -50,7 +50,7 @@ final class OfflineStateTests: XCTestCase {
 
 	func testLifetimeLicenceKeepsUnboundedGrace() async throws {
 		let signed = try TestSigner.sign(
-			.init(tier: "lifetime", exp: now.addingTimeInterval(-86_400), expiresAt: nil))
+			.init(kind: "perpetual", exp: now.addingTimeInterval(-86_400), expiresAt: nil))
 		let cb = client(signed.token, keys: signed.keys)
 		let state = await cb.offlineState()
 		XCTAssertEqual(state, .grace)
@@ -58,7 +58,7 @@ final class OfflineStateTests: XCTestCase {
 
 	func testTrialGetsNoGraceAtAll() async throws {
 		// Unbounded grace on a trial would make a blocked endpoint an unlimited trial.
-		let signed = try TestSigner.sign(.init(tier: "trial", exp: now.addingTimeInterval(-1)))
+		let signed = try TestSigner.sign(.init(kind: "trial", exp: now.addingTimeInterval(-1)))
 		let cb = client(signed.token, keys: signed.keys)
 		let state = await cb.offlineState()
 		XCTAssertEqual(state, .expired)

@@ -40,7 +40,7 @@ print("fingerprint : \(cb.fingerprint())")
 
 do {
 	let activated = try await cb.activate(licenseKey: licenseKey, name: "example-cli")
-	print("activated   : \(activated.instance.id) (\(activated.license.tier))")
+	print("activated   : \(activated.instance.id) (\(activated.license.kind))")
 
 	let verified = try await cb.verify(licenseKey: licenseKey, instanceId: activated.instance.id)
 	print("verified    : valid=\(verified.valid) inconclusive=\(verified.inconclusive)")

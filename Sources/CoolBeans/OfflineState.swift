@@ -29,17 +29,17 @@ extension CoolBeans {
 
 		let now = effectiveNow()
 
-		// A signed expiry that has passed is definitive, whatever the tier. The token we
+		// A signed expiry that has passed is definitive, whatever the kind. The token we
 		// were issued says this licence ended, so honouring it is reading our own
 		// credential rather than inferring revocation from a network failure — §8 is
 		// untouched, and it is what makes revocation reach a machine that has gone dark.
-		// Lifetime licences carry no expires_at and are unaffected.
+		// Perpetual licences carry no expires_at and are unaffected.
 		if let raw = payload.expiresAt, let expiry = Self.parseDate(raw), expiry <= now {
 			return .expired
 		}
 
 		let tokenExpiry = Date(timeIntervalSince1970: TimeInterval(payload.exp))
-		if payload.tier == "trial" {
+		if payload.kind == "trial" {
 			// Trials get no TTL grace either, or a blocked endpoint becomes an unlimited trial.
 			return tokenExpiry > now ? .valid : .expired
 		}

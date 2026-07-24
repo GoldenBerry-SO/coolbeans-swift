@@ -84,7 +84,7 @@ final class KeyRotationTests: XCTestCase {
 			storage: store,
 			transport: StubTransport { path, _ in
 				if path == "/v1/pubkey" { return (200, #"{"ok":true,"keys":\#(keysJSON)}"#) }
-				return (200, #"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"token":"\#(rotated.token)"}"#)
+				return (200, #"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"clementine","expires_at":null},"token":"\#(rotated.token)"}"#)
 			})
 		_ = try await cb.verify(licenseKey: "K", instanceId: "inst-1")
 		let state = await cb.offlineState()
@@ -134,7 +134,7 @@ final class WatermarkWiringTests: XCTestCase {
 			storage: store,
 			transport: StubTransport { path, _ in
 				if path == "/v1/pubkey" { return (200, #"{"ok":true,"keys":{}}"#) }
-				return (200, #"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"token":"\#(signed.token)"}"#)
+				return (200, #"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"clementine","expires_at":null},"token":"\#(signed.token)"}"#)
 			})
 		XCTAssertNil(cb.trustedTime)
 		_ = try await cb.verify(licenseKey: "K", instanceId: "inst-1")

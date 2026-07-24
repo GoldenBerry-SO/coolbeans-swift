@@ -70,7 +70,7 @@ final class LicenseGateTests: XCTestCase {
 		let signed = try TestSigner.sign(.init(exp: now.addingTimeInterval(3600)))
 		let g = gate(token: signed.token, keys: signed.keys) { path, _ in
 			if path == "/v1/pubkey" { return (200, #"{"ok":true,"keys":{}}"#) }
-			return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","tier":"yearly","product":"clementine","expires_at":null}}"#)
+			return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","kind":"subscription","product":"clementine","expires_at":null}}"#)
 		}
 		await g.refresh(licenseKey: "K")
 		XCTAssertFalse(g.isUnlocked)

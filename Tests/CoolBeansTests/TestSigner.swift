@@ -14,7 +14,8 @@ enum TestSigner {
 	struct Claims {
 		var key = "CLEM-A2B3-C4D5-E6F7-G8H9"
 		var status = "active"
-		var tier = "yearly"
+		var kind = "subscription"
+		var plan: String?
 		var product = "clementine"
 		var instanceId = "inst-1"
 		var expiresAt: Date?
@@ -25,7 +26,8 @@ enum TestSigner {
 		init(
 			key: String = "CLEM-A2B3-C4D5-E6F7-G8H9",
 			status: String = "active",
-			tier: String = "yearly",
+			kind: String = "subscription",
+			plan: String? = nil,
 			product: String = "clementine",
 			instanceId: String = "inst-1",
 			exp: Date,
@@ -34,7 +36,8 @@ enum TestSigner {
 		) {
 			self.key = key
 			self.status = status
-			self.tier = tier
+			self.kind = kind
+			self.plan = plan
 			self.product = product
 			self.instanceId = instanceId
 			self.exp = exp
@@ -49,7 +52,8 @@ enum TestSigner {
 		var payload: [String: Any] = [
 			"key": claims.key,
 			"status": claims.status,
-			"tier": claims.tier,
+			"kind": claims.kind,
+			"plan": claims.plan ?? NSNull(),
 			"product": claims.product,
 			"instance_id": claims.instanceId,
 			"iat": Int(claims.iat.timeIntervalSince1970),
