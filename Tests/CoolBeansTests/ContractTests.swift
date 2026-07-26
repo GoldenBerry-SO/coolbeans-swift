@@ -137,3 +137,53 @@ private final class MovableClock: @unchecked Sendable {
 		current = current.addingTimeInterval(seconds)
 	}
 }
+
+/// Signing out (#78) — the last place an app had to keep an instance id.
+final class ReleaseTests: XCTestCase {
+	private func client(_ handler: @escaping @Sendable (String, String) -> (Int, String)) -> CoolBeans {
+		CoolBeans(
+			configuration: .init(product: "clementine", baseURL: URL(string: "https://x.test")!),
+			storage: InMemoryStorage(),
+			transport: StubTransport(handler: handler))
+	}
+
+	func testReleaseFreesTheSeatWithNothingHandedToIt() async throws {
+		let cb = client { path, _ in
+			switch path {
+			case "/v1/activate":
+				return (
+					200,
+					#"{"ok":true,"license":{"key":"K","status":"active","kind":"perpetual","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#
+				)
+			default: return (200, #"{"ok":true}"#)
+			}
+		}
+		_ = try await cb.activate(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		let released = await cb.release()
+		XCTAssertTrue(released)
+		XCTAssertNil(cb.instanceId)
+		XCTAssertNil(cb.licenseKey)
+	}
+
+	func testReleaseSaysSoRatherThanThrowingWhenThereIsNothingToFree() async {
+		let released = await client { _, _ in (200, #"{"ok":true}"#) }.release()
+		XCTAssertFalse(released)
+	}
+
+	func testReleaseKeepsTheSeatWhenTheServerCouldNotBeReached() async throws {
+		// Reporting a freed seat that was never freed makes the app stop retrying, and the seat
+		// stays taken until the lease lapses — or forever, on a node-locked product.
+		let cb = client { path, _ in
+			path == "/v1/activate"
+				? (
+					200,
+					#"{"ok":true,"license":{"key":"K","status":"active","kind":"perpetual","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#
+				)
+				: (-1, "")
+		}
+		_ = try await cb.activate(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		let released = await cb.release()
+		XCTAssertFalse(released)
+		XCTAssertEqual(cb.instanceId, "inst-1")
+	}
+}

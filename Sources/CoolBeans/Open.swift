@@ -40,6 +40,26 @@ extension CoolBeans {
 		return try? await heartbeat(licenseKey: key, instanceId: instanceId)
 	}
 
+	/// Free this device's seat and forget the licence locally. Call it on sign-out.
+	///
+	/// Needs nothing handed to it: activation stored the key and the instance id. Returns false
+	/// when there was nothing to release, or when we could not reach the server — telling a
+	/// caller the seat is free when it is not makes them stop retrying, and the seat stays taken
+	/// until the lease lapses, or forever on a node-locked product.
+	@discardableResult
+	public func release() async -> Bool {
+		guard let key = licenseKey, let instanceId else { return false }
+		do {
+			try await deactivate(licenseKey: key, instanceId: instanceId)
+		} catch {
+			return false
+		}
+		// deactivate clears the credential; a stale revocation marker would otherwise make the
+		// next launch say "revoked" about a licence nobody is holding.
+		storage.remove(StorageKey.revoked)
+		return true
+	}
+
 	/// The online half of `open()`. Nil for every inconclusive answer, which is the caller's cue to
 	/// fall back to the cached token rather than deny anything.
 	private func openOnline(_ licenseKey: String) async -> AccessState? {
