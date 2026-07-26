@@ -31,6 +31,8 @@ public final class CoolBeans: @unchecked Sendable {
 	let storage: CoolBeansStorage
 	let transport: CoolBeansTransport
 	private let clock: @Sendable () -> Date
+	/// The background refresh and seat loops `open()` starts and `stop()` cancels.
+	let upkeep = Upkeep()
 	private let deviceLock = NSLock()
 	private var resolvedFingerprint: String?
 

@@ -187,3 +187,101 @@ final class ReleaseTests: XCTestCase {
 		XCTAssertEqual(cb.instanceId, "inst-1")
 	}
 }
+
+/// The SDK holds a floating seat itself, like the TypeScript one (Codex on #77).
+final class SeatUpkeepTests: XCTestCase {
+	private let lease = "2030-01-01T00:00:00Z"
+
+	/// A transport that counts what it was asked for and answers like the real server.
+	private final class CountingTransport: CoolBeansTransport, @unchecked Sendable {
+		private let lock = NSLock()
+		private var counts: [String: Int] = [:]
+		let leaseExpiresAt: String?
+
+		init(leaseExpiresAt: String?) { self.leaseExpiresAt = leaseExpiresAt }
+
+		func count(_ path: String) -> Int {
+			lock.lock()
+			defer { lock.unlock() }
+			return counts[path] ?? 0
+		}
+
+		func post(url: URL, body: Data) async throws -> (status: Int, body: String) {
+			lock.lock()
+			counts[url.path, default: 0] += 1
+			lock.unlock()
+			let license =
+				#"{"key":"K","status":"active","kind":"perpetual","product":"clementine","expires_at":null}"#
+			switch url.path {
+			case "/v1/activate":
+				return (200, #"{"ok":true,"license":\#(license),"instance":{"id":"inst-1","name":"Mac"}}"#)
+			case "/v1/validate":
+				return (200, #"{"ok":true,"valid":true,"license":\#(license)}"#)
+			case "/v1/heartbeat":
+				let lease = leaseExpiresAt.map { "\"\($0)\"" } ?? "null"
+				return (200, #"{"ok":true,"lease_expires_at":\#(lease)}"#)
+			default:
+				return (200, #"{"ok":true}"#)
+			}
+		}
+
+		func get(url: URL) async throws -> (status: Int, body: String) {
+			lock.lock()
+			counts[url.path, default: 0] += 1
+			lock.unlock()
+			return (200, #"{"ok":true,"keys":{}}"#)
+		}
+	}
+
+	private func client(_ transport: CountingTransport) -> CoolBeans {
+		CoolBeans(
+			configuration: .init(product: "clementine", baseURL: URL(string: "https://x.test")!),
+			storage: InMemoryStorage(),
+			transport: transport)
+	}
+
+	func testOpenHoldsAFloatingSeatWithoutTheAppAskingForIt() async throws {
+		// The app is told nothing about lease windows and schedules nothing. Making an app pick a
+		// heartbeat interval is making it decide whether its own users lose their seat.
+		let transport = CountingTransport(leaseExpiresAt: lease)
+		let cb = client(transport)
+		await cb.open(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		defer { cb.stop() }
+		XCTAssertEqual(transport.count("/v1/heartbeat"), 1)
+	}
+
+	func testANodeLockedProductIsProbedOnceAndNeverAgain() async throws {
+		// A null lease is the server saying there is nothing to renew.
+		let transport = CountingTransport(leaseExpiresAt: nil)
+		let cb = client(transport)
+		await cb.open(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		defer { cb.stop() }
+		XCTAssertEqual(transport.count("/v1/heartbeat"), 1)
+		XCTAssertNil(cb.leaseCadence, "a node-locked product must schedule nothing")
+	}
+
+	func testStopEndsTheUpkeep() async throws {
+		let transport = CountingTransport(leaseExpiresAt: lease)
+		let cb = client(transport)
+		await cb.open(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		XCTAssertTrue(cb.isRunning)
+		cb.stop()
+		XCTAssertFalse(cb.isRunning, "stop() must leave nothing scheduled")
+		XCTAssertEqual(cb.upkeep.startedLoops, 0)
+		cb.stop()  // idempotent
+		XCTAssertFalse(cb.isRunning)
+	}
+
+	func testOpeningTwiceDoesNotLeaveTwoLoopsRunning() async throws {
+		let transport = CountingTransport(leaseExpiresAt: lease)
+		let cb = client(transport)
+		await cb.open(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		await cb.open(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+		defer { cb.stop() }
+		// Two beats because two opens each probe, which is right. What must not happen is two
+		// loops: a leaked pair sits in Task.sleep for hours and then beats forever, which no
+		// assertion on request counts would ever catch — hence counting the loops themselves.
+		XCTAssertEqual(transport.count("/v1/heartbeat"), 2)
+		XCTAssertEqual(cb.upkeep.startedLoops, 2, "one refresh loop and one beat loop, not two pairs")
+	}
+}

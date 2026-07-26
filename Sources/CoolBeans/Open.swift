@@ -20,24 +20,87 @@ extension CoolBeans {
 	///
 	/// The licence key is optional after the first run: activation persists it.
 	@discardableResult
-	public func open(licenseKey: String? = nil) async -> AccessState {
+	public func open(licenseKey: String? = nil, onChange: (@Sendable (AccessState) -> Void)? = nil)
+		async -> AccessState
+	{
+		if let onChange { upkeep.onChange = onChange }
+		let state = await evaluate(key: licenseKey ?? self.licenseKey)
+		upkeep.remember(state)
+		// Take the floating seat before saying yes, so an allow means the seat is actually held.
+		// One probe is also how we learn whether this product has leases at all.
+		if state.decision == .allow { await holdSeat() }
+		startUpkeep()
+		return state
+	}
+
+	/// The verdict itself, with none of the upkeep bookkeeping — this is what a background tick
+	/// runs, and it must not restart the loop it is running inside.
+	private func evaluate(key: String?) async -> AccessState {
 		// Before anything reads the clock: record how late it has ever been on this install.
 		advanceTrustedTime(to: now())
-		let key = licenseKey ?? self.licenseKey
 		if let key, let online = await openOnline(key) { return online }
 		return await offlineVerdict().state
 	}
 
-	/// A floating product needs its seat held while the app runs. Returns the new lease expiry, or
-	/// nil when there was nothing to renew — a node-locked product, or a seat we could not hold.
+	/// Hold a floating seat on the cadence the server's own lease implies — about a third of the
+	/// window, so a dropped beat has two more tries before the seat lapses.
 	///
-	/// Kept explicit rather than scheduled for you: this SDK has no run loop of its own, and an
-	/// app that owns its timers should own this one too. Beat at about a third of the window the
-	/// server hands back, so one dropped request does not cost the user their seat.
+	/// Started by `open()` and cancelled by `stop()`. The app is never asked whether its product
+	/// has leases: a null `lease_expires_at` says so, and then nothing more is scheduled. Nothing
+	/// here reaches the app — a missed beat costs a seat, not correctness.
 	@discardableResult
 	public func holdSeat() async -> String? {
 		guard let key = licenseKey, let instanceId else { return nil }
-		return try? await heartbeat(licenseKey: key, instanceId: instanceId)
+		let lease = try? await heartbeat(licenseKey: key, instanceId: instanceId)
+		if let lease, let expiry = Self.parseDate(lease) {
+			let remaining = expiry.timeIntervalSince(now())
+			// A failed beat is not evidence the product stopped having leases, so the cadence is
+			// only ever set from an answer, and kept once known.
+			if remaining > 0 { upkeep.leaseCadence = max(1, remaining / 3) }
+		} else if lease == nil {
+			// Definitive: nothing to renew. Node-locked, or a seat we could not hold — and the
+			// refresh loop re-activates for the second case.
+			upkeep.leaseCadence = nil
+			upkeep.leaseKnown = true
+		}
+		return lease
+	}
+
+	/// The seat cadence in seconds once the server has told us, nil for a node-locked product.
+	public var leaseCadence: TimeInterval? { upkeep.leaseCadence }
+
+	/// Whether `open()`'s background upkeep is running.
+	public var isRunning: Bool { upkeep.isRunning }
+
+	/// Cancel the background upkeep `open()` started. Idempotent. Call it on app shutdown.
+	public func stop() {
+		upkeep.stop()
+	}
+
+	/// Start (or restart) the loops that keep this install fresh and its seat held.
+	private func startUpkeep() {
+		upkeep.stop()
+		upkeep.start(
+			refresh: { [weak self] in
+				guard let self else { return }
+				// The stored key: activation persisted it, and a background tick has nothing else.
+				let state = await self.evaluate(key: self.licenseKey)
+				self.upkeep.publish(state)
+			},
+			refreshEvery: { [weak self] in self?.refreshInterval() ?? 86_400 },
+			beat: { [weak self] in await self?.holdSeat() },
+			beatEvery: { [weak self] in self?.upkeep.leaseCadence }
+		)
+	}
+
+	/// A third of the cached token's lifetime, so there are two or three chances to reconnect
+	/// before a user drifts into grace. A day when no token has been cached yet.
+	private func refreshInterval() -> TimeInterval {
+		guard let token = storage.get(StorageKey.token),
+			let payload = TokenVerifier.verify(token, keys: trustedKeys()),
+			payload.exp > payload.iat
+		else { return 86_400 }
+		return TimeInterval(payload.exp - payload.iat) / 3
 	}
 
 	/// Free this device's seat and forget the licence locally. Call it on sign-out.

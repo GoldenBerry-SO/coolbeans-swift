@@ -16,8 +16,13 @@ let cb = CoolBeans(configuration: .init(
 ))
 
 // On launch, and again whenever the user pastes a key. This is the whole integration.
-let state = await cb.open(licenseKey: key)
+let state = await cb.open(licenseKey: key) { next in
+  if next.decision == .deny { lockOut(next) }   // fires when the verdict changes later
+}
 if state.decision == .deny { lockOut(state) } else { unlock() }
+
+// On shutdown
+cb.stop()
 ```
 
 `open()` activates on first run, validates after that, and falls back to the cached signed
@@ -69,20 +74,21 @@ Keys fetched later from `/v1/pubkey` are merged with the embedded ones so a serv
 rotation does not need an app update. **Embedded keys are never displaced** — they are the
 trust anchor that shipped inside your signed binary.
 
-## How often to check
+## What `open()` does after it returns
 
-This SDK has no run loop of its own, so the cadence is yours: call `open()` on launch, then
-roughly every TTL/3 to TTL/2 — daily on the 7-day default, which gives two or three chances
-to reconnect before a user drifts into grace. Add jitter so every install does not wake on
-the same tick.
+It keeps itself fresh, so there is no cadence for you to pick:
 
-For a **floating** product also call `await cb.holdSeat()` on a timer, at about a third of
-the lease window it hands back, so one dropped request does not cost the user their seat. It
-returns nil for a node-locked product, so there is no seat model to branch on.
+- **Re-checks on its own**, at a third of the token's lifetime, jittered so every install of your
+  app does not wake on the same tick. A changed verdict arrives through `onChange:`.
+- **Holds a floating seat itself**, on the cadence the server's own lease implies — about a third
+  of the window, so one dropped beat does not cost the user their seat. A node-locked product
+  returns no lease and nothing further is scheduled, so there is no seat model to branch on.
+- `cb.stop()` cancels both, for app shutdown. `await cb.release()` gives the seat back on sign-out
+  and returns false if it could not reach us, so you know to retry.
 
-**Do not** call `open()` on every feature use or window focus — that is what the cached token
-is for, and it turns a network blip into visible flakiness. **Do not** treat a failed check as
-a reason to do anything abrupt: it already resolved to the last good state.
+**Do not** call `open()` on every feature use or window focus — that is what the cached token is
+for, and it turns a network blip into visible flakiness. **Do not** treat a failed check as a
+reason to do anything abrupt: it already resolved to the last good state.
 
 ## The three offline states
 
