@@ -21,6 +21,7 @@ enum TestSigner {
 		var expiresAt: Date?
 		var exp: Date
 		var fingerprint: String?
+		var entitlements: [String: EntitlementValue]?
 		var iat = Date(timeIntervalSince1970: 1_700_000_000)
 
 		init(
@@ -32,7 +33,8 @@ enum TestSigner {
 			instanceId: String = "inst-1",
 			exp: Date,
 			expiresAt: Date? = nil,
-			fingerprint: String? = nil
+			fingerprint: String? = nil,
+			entitlements: [String: EntitlementValue]? = nil
 		) {
 			self.key = key
 			self.status = status
@@ -43,10 +45,13 @@ enum TestSigner {
 			self.exp = exp
 			self.expiresAt = expiresAt
 			self.fingerprint = fingerprint
+			self.entitlements = entitlements
 		}
 	}
 
-	static func sign(_ claims: Claims, kid: String = "1") throws -> (token: String, keys: [String: String]) {
+	static func sign(_ claims: Claims, kid: String = "1", iat: Date? = nil) throws -> (
+		token: String, keys: [String: String]
+	) {
 		let priv = Curve25519.Signing.PrivateKey()
 		let formatter = ISO8601DateFormatter()
 		var payload: [String: Any] = [
@@ -56,11 +61,21 @@ enum TestSigner {
 			"plan": claims.plan ?? NSNull(),
 			"product": claims.product,
 			"instance_id": claims.instanceId,
-			"iat": Int(claims.iat.timeIntervalSince1970),
+			"iat": Int((iat ?? claims.iat).timeIntervalSince1970),
 			"exp": Int(claims.exp.timeIntervalSince1970),
 		]
 		payload["expires_at"] = claims.expiresAt.map { formatter.string(from: $0) } ?? NSNull()
 		if let fingerprint = claims.fingerprint { payload["fingerprint"] = fingerprint }
+		// Omitted rather than nulled when there are none, exactly as the server signs it.
+		if let entitlements = claims.entitlements {
+			payload["entitlements"] = entitlements.mapValues { value -> Any in
+				switch value {
+				case .bool(let flag): return flag
+				case .number(let number): return number
+				case .string(let text): return text
+				}
+			}
+		}
 
 		let header = try JSONSerialization.data(
 			withJSONObject: ["alg": "EdDSA", "typ": "CBT", "kid": kid])

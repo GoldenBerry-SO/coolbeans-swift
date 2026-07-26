@@ -29,6 +29,10 @@ extension CoolBeans {
 
 		struct Payload: Decodable {
 			let ok: Bool
+			/// Whether this instance is entitled right now — false for a seat freed from the
+			/// console, whatever the licence itself says. Absent is not a definitive no, so an
+			/// older body without it is read as valid rather than second-guessed.
+			let valid: Bool?
 			let license: LicenseObject?
 			let token: String?
 		}
@@ -63,7 +67,11 @@ extension CoolBeans {
 			}
 		}
 		return VerifyResult(
-			valid: true, license: license, token: payload.token, offline: false, inconclusive: false)
+			valid: payload.valid ?? true,
+			license: license,
+			token: payload.token,
+			offline: false,
+			inconclusive: false)
 	}
 
 	/// Free this device's seat. Idempotent server-side.
