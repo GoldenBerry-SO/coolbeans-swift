@@ -285,3 +285,116 @@ final class SeatUpkeepTests: XCTestCase {
 		XCTAssertEqual(cb.upkeep.startedLoops, 2, "one refresh loop and one beat loop, not two pairs")
 	}
 }
+
+/// Telling "there is nothing to renew" apart from "we could not ask" (careful review).
+final class LeaseKnowledgeTests: XCTestCase {
+	private func client(_ handler: @escaping @Sendable (String, String) -> (Int, String)) -> CoolBeans
+	{
+		CoolBeans(
+			configuration: .init(product: "clementine", baseURL: URL(string: "https://x.test")!),
+			storage: InMemoryStorage(),
+			transport: StubTransport(handler: handler))
+	}
+
+	private static let license =
+		#"{"key":"K","status":"active","kind":"perpetual","product":"clementine","expires_at":null}"#
+
+	private func activated(_ cb: CoolBeans) async throws {
+		_ = try await cb.activate(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9")
+	}
+
+	func testANullLeaseIsDefinitiveAndEndsTheBeats() async throws {
+		let cb = client { path, _ in
+			path == "/v1/activate"
+				? (200, #"{"ok":true,"license":\#(Self.license),"instance":{"id":"i","name":"Mac"}}"#)
+				: (200, #"{"ok":true,"lease_expires_at":null}"#)
+		}
+		try await activated(cb)
+		await cb.holdSeat()
+		XCTAssertNil(cb.leaseCadence)
+		XCTAssertTrue(cb.upkeep.leaseKnown, "a null lease is the server saying there is nothing to renew")
+	}
+
+	func testAFailedBeatIsNotAnAnswerAboutLeases() async throws {
+		// `try?` used to collapse a thrown request into the same nil the server sends for a
+		// node-locked product, so one dropped beat stopped the loop for good and a floating seat
+		// lapsed while the app was still running.
+		let cb = client { path, _ in
+			path == "/v1/activate"
+				? (200, #"{"ok":true,"license":\#(Self.license),"instance":{"id":"i","name":"Mac"}}"#)
+				: (-1, "")
+		}
+		try await activated(cb)
+		await cb.holdSeat()
+		XCTAssertNil(cb.leaseCadence)
+		XCTAssertFalse(cb.upkeep.leaseKnown, "a failed beat must leave us still asking")
+	}
+
+	func testTakingAFreshSeatReopensTheLeaseQuestion() async throws {
+		// A seat freed from the console answers null. The refresh then re-activates, and the new
+		// seat has to be held too — otherwise it lapses, gets re-activated, and churns forever.
+		let cb = client { path, _ in
+			path == "/v1/activate"
+				? (200, #"{"ok":true,"license":\#(Self.license),"instance":{"id":"i","name":"Mac"}}"#)
+				: (200, #"{"ok":true,"lease_expires_at":null}"#)
+		}
+		try await activated(cb)
+		await cb.holdSeat()
+		XCTAssertTrue(cb.upkeep.leaseKnown)
+		try await activated(cb)
+		XCTAssertFalse(cb.upkeep.leaseKnown, "a new seat is a new lease question")
+	}
+
+	func testALiveLeaseSetsACadenceOfAboutAThirdOfTheWindow() async throws {
+		let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(1800))
+		let cb = client { path, _ in
+			path == "/v1/activate"
+				? (200, #"{"ok":true,"license":\#(Self.license),"instance":{"id":"i","name":"Mac"}}"#)
+				: (200, #"{"ok":true,"lease_expires_at":"\#(expiry)"}"#)
+		}
+		try await activated(cb)
+		await cb.holdSeat()
+		let cadence = try XCTUnwrap(cb.leaseCadence)
+		XCTAssertEqual(cadence, 600, accuracy: 30)
+		XCTAssertTrue(cb.upkeep.leaseKnown)
+	}
+}
+
+/// Reading a capability the same way both SDKs do (careful review).
+final class EntitlementValueTests: XCTestCase {
+	private func state(_ entitlements: [String: EntitlementValue]) -> AccessState {
+		AccessState(
+			decision: .allow, reason: .cached, license: nil, expiresAt: nil,
+			entitlements: entitlements)
+	}
+
+	func testABooleanFlagReadsAsItself() {
+		XCTAssertTrue(state(["a": .bool(true)]).isEntitled("a"))
+		XCTAssertFalse(state(["a": .bool(false)]).isEntitled("a"))
+	}
+
+	func testAnAbsentNameIsOff() {
+		XCTAssertFalse(state([:]).isEntitled("a"))
+		XCTAssertFalse(
+			AccessState(decision: .allow, reason: .cached, license: nil, expiresAt: nil, entitlements: nil)
+				.isEntitled("a"))
+	}
+
+	func testANumberOrStringFlagReadsTheWayJavaScriptReadsIt() {
+		// The TypeScript SDK's documented gate is `state.entitlements?.export_4k`, which is plain
+		// truthiness. A vendor who types `export_4k=1` must not get the feature on one platform and
+		// not the other — that is a support ticket nobody can reproduce.
+		XCTAssertTrue(state(["a": .number(1)]).isEntitled("a"))
+		XCTAssertFalse(state(["a": .number(0)]).isEntitled("a"))
+		XCTAssertTrue(state(["a": .string("yes")]).isEntitled("a"))
+		XCTAssertFalse(state(["a": .string("")]).isEntitled("a"))
+	}
+
+	func testALimitReadsANumericStringToo() {
+		// Same reason: `Number(entitlements?.batch_limit ?? 1)` in TypeScript accepts "100".
+		XCTAssertEqual(state(["n": .number(100)]).limit("n"), 100)
+		XCTAssertEqual(state(["n": .string("100")]).limit("n"), 100)
+		XCTAssertNil(state(["n": .string("lots")]).limit("n"))
+		XCTAssertNil(state([:]).limit("n"))
+	}
+}

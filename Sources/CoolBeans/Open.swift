@@ -51,18 +51,26 @@ extension CoolBeans {
 	@discardableResult
 	public func holdSeat() async -> String? {
 		guard let key = licenseKey, let instanceId else { return nil }
-		let lease = try? await heartbeat(licenseKey: key, instanceId: instanceId)
-		if let lease, let expiry = Self.parseDate(lease) {
-			let remaining = expiry.timeIntervalSince(now())
-			// A failed beat is not evidence the product stopped having leases, so the cadence is
-			// only ever set from an answer, and kept once known.
-			if remaining > 0 { upkeep.leaseCadence = max(1, remaining / 3) }
-		} else if lease == nil {
-			// Definitive: nothing to renew. Node-locked, or a seat we could not hold — and the
-			// refresh loop re-activates for the second case.
+		let lease: String?
+		do {
+			lease = try await heartbeat(licenseKey: key, instanceId: instanceId)
+		} catch {
+			// A failed request is not an answer about leases. `try?` collapsed this into the same
+			// nil the server sends for a node-locked product, so one dropped beat concluded there
+			// was nothing to renew and a floating seat lapsed while the app was still running.
+			return nil
+		}
+		guard let lease, let expiry = Self.parseDate(lease) else {
+			// Definitive: nothing to renew. Node-locked, or a seat we could not hold — the refresh
+			// re-activates for the second case, and taking a seat reopens the question.
 			upkeep.leaseCadence = nil
 			upkeep.leaseKnown = true
+			return nil
 		}
+		let remaining = expiry.timeIntervalSince(now())
+		// A third of the window, so a dropped beat has two more tries before the seat lapses.
+		if remaining > 0 { upkeep.leaseCadence = max(1, remaining / 3) }
+		upkeep.leaseKnown = true
 		return lease
 	}
 
@@ -89,7 +97,14 @@ extension CoolBeans {
 			},
 			refreshEvery: { [weak self] in self?.refreshInterval() ?? 86_400 },
 			beat: { [weak self] in await self?.holdSeat() },
-			beatEvery: { [weak self] in self?.upkeep.leaseCadence }
+			beatEvery: { [weak self] in
+				guard let self else { return nil }
+				if let cadence = self.upkeep.leaseCadence { return cadence }
+				// No cadence. If the server has told us there is nothing to renew, stop for good;
+				// otherwise the probe never landed, so ask again on the refresh cadence rather
+				// than abandoning a seat we may well be holding.
+				return self.upkeep.leaseKnown ? nil : self.refreshInterval()
+			}
 		)
 	}
 

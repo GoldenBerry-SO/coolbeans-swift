@@ -59,14 +59,31 @@ public enum EntitlementValue: Sendable, Equatable, Codable {
 		return nil
 	}
 
+	/// Truthiness, matching JavaScript for the three shapes a capability can be, because that is
+	/// what `state.entitlements?.<name>` does in the other SDK.
+	public var isTruthy: Bool {
+		switch self {
+		case .bool(let value): return value
+		case .number(let value): return value != 0
+		case .string(let value): return !value.isEmpty
+		}
+	}
+
+	/// A numeric string counts, since `Number("100")` does on the other side.
 	public var intValue: Int? {
-		if case .number(let value) = self { return Int(value) }
-		return nil
+		switch self {
+		case .number(let value): return Int(value)
+		case .string(let value): return Int(value)
+		case .bool: return nil
+		}
 	}
 
 	public var doubleValue: Double? {
-		if case .number(let value) = self { return value }
-		return nil
+		switch self {
+		case .number(let value): return value
+		case .string(let value): return Double(value)
+		case .bool: return nil
+		}
 	}
 
 	public var stringValue: String? {
@@ -95,8 +112,12 @@ public struct AccessState: Sendable, Equatable {
 
 	/// Whether a capability is switched on. False for a licence with no capability map, which is
 	/// what makes this safe to call unconditionally.
+	///
+	/// Read exactly the way the TypeScript SDK's documented gate reads it — plain truthiness — so a
+	/// vendor who writes `export_4k=1` instead of `true` does not get the feature on one platform
+	/// and not the other. That is a support ticket nobody can reproduce.
 	public func isEntitled(_ name: String) -> Bool {
-		entitlements?[name]?.boolValue == true
+		entitlements?[name]?.isTruthy == true
 	}
 
 	/// A numeric capability, e.g. a batch limit. Nil when the vendor priced no such thing.

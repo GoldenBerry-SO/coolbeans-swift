@@ -86,9 +86,24 @@ public final class LicenseGate {
 		let cached = await client.offlineState()
 		status = Self.map(cached)
 
-		let state = await client.open(licenseKey: licenseKey)
+		// The handler is what makes a long-running app notice a revocation: open() checks once and
+		// then keeps checking on its own, and without this the gate would sit on the launch answer
+		// until somebody relaunched.
+		let state = await client.open(licenseKey: licenseKey) { [weak self] next in
+			Task { @MainActor in self?.apply(next) }
+		}
+		apply(state)
+	}
+
+	/// Adopt a verdict, from `open()` or from the SDK's own background check.
+	func apply(_ state: AccessState) {
 		access = state
 		status = Self.map(state)
+	}
+
+	/// Stop the SDK's background upkeep. Call it when the app is shutting down.
+	public func stop() {
+		client.stop()
 	}
 
 	/// Activate this device, then settle. Surfaces the server's own sentence on failure.
