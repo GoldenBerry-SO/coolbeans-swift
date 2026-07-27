@@ -89,8 +89,11 @@ public final class LicenseGate {
 		// The handler is what makes a long-running app notice a revocation: open() checks once and
 		// then keeps checking on its own, and without this the gate would sit on the launch answer
 		// until somebody relaunched.
+		// Bound to a local before the hop: `self?` inside the inner Task is a captured var crossing
+		// a concurrency boundary, which the macOS toolchain rejects even though Linux's let it pass.
 		let state = await client.open(licenseKey: licenseKey) { [weak self] next in
-			Task { @MainActor in self?.apply(next) }
+			guard let gate = self else { return }
+			Task { @MainActor in gate.apply(next) }
 		}
 		apply(state)
 	}
