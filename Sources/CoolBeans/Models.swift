@@ -6,12 +6,15 @@ import Foundation
 public struct LicenseObject: Codable, Sendable, Equatable {
 	public let key: String
 	public let status: String
-	public let tier: String
+	/// Entitlement lifecycle (perpetual | subscription | trial), not pricing. Do not branch on it.
+	public let kind: String
+	/// The vendor's free-form plan label (display only), or nil.
+	public let plan: String?
 	public let product: String
 	public let expiresAt: String?
 
 	enum CodingKeys: String, CodingKey {
-		case key, status, tier, product
+		case key, status, kind, plan, product
 		case expiresAt = "expires_at"
 	}
 }

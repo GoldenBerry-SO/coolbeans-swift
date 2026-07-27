@@ -71,26 +71,42 @@ public final class LicenseGate {
 		await client.verifyOffline()
 	}
 
-	/// Settle the current state. Reads the cached token first so the UI is correct
-	/// immediately, then confirms online when a key is available.
+	/// The last verdict `open()` returned, for an app that wants the reason or the entitlements
+	/// rather than just a status.
+	public private(set) var access: AccessState?
+
+	/// Settle the current state, with the one call that owns the whole decision: it activates if
+	/// it must, refreshes when it can, and falls back to the cached token when it cannot.
+	///
+	/// The gate deliberately holds no rules of its own. Two copies of "when do we lock the app"
+	/// is two chances to lock out somebody who paid.
 	public func refresh(licenseKey: String? = nil) async {
-		let offline = await client.offlineState()
-		status = Self.map(offline)
+		// The UI should be right immediately rather than after a round trip, so read what we
+		// already hold before going anywhere.
+		let cached = await client.offlineState()
+		status = Self.map(cached)
 
-		// Fall back to the stored credential: an app relaunching has no key in hand, and
-		// without this refresh() stops short of the server for the life of the install.
-		guard let licenseKey = licenseKey ?? client.licenseKey, let instanceId = client.instanceId
-		else { return }
-		guard let result = try? await client.verify(licenseKey: licenseKey, instanceId: instanceId)
-		else { return }
-
-		if !result.inconclusive, result.license?.status == "disabled" {
-			// The single definitive revocation. Everything else leaves the app as it was.
-			status = .revoked
-			return
+		// The handler is what makes a long-running app notice a revocation: open() checks once and
+		// then keeps checking on its own, and without this the gate would sit on the launch answer
+		// until somebody relaunched.
+		// Bound to a local before the hop: `self?` inside the inner Task is a captured var crossing
+		// a concurrency boundary, which the macOS toolchain rejects even though Linux's let it pass.
+		let state = await client.open(licenseKey: licenseKey) { [weak self] next in
+			guard let gate = self else { return }
+			Task { @MainActor in gate.apply(next) }
 		}
-		// Re-read: verify may have refreshed the token, which can move grace back to active.
-		status = Self.map(await client.offlineState())
+		apply(state)
+	}
+
+	/// Adopt a verdict, from `open()` or from the SDK's own background check.
+	func apply(_ state: AccessState) {
+		access = state
+		status = Self.map(state)
+	}
+
+	/// Stop the SDK's background upkeep. Call it when the app is shutting down.
+	public func stop() {
+		client.stop()
 	}
 
 	/// Activate this device, then settle. Surfaces the server's own sentence on failure.
@@ -116,6 +132,15 @@ public final class LicenseGate {
 			try? await client.deactivate(licenseKey: key, instanceId: instanceId)
 		}
 		status = .locked
+	}
+
+	private static func map(_ state: AccessState) -> LicenseStatus {
+		switch (state.decision, state.reason) {
+		case (.allow, .grace): return .grace
+		case (.allow, _): return .active
+		case (.deny, .revoked): return .revoked
+		case (.deny, _): return .locked
+		}
 	}
 
 	private static func map(_ state: OfflineState) -> LicenseStatus {

@@ -18,6 +18,15 @@ extension CoolBeans {
 		storage.set(StorageKey.watermark, String(candidate.timeIntervalSince1970))
 	}
 
+	/// Put the mark back to a time the server has just confirmed.
+	///
+	/// The only thing allowed to move it backwards, and only because a reachable server is the
+	/// authority on what time it is not. Without this a machine whose clock ran far ahead once
+	/// would serve that penalty forever, judged against a mark it can never reach again.
+	func resetTrustedTime(to confirmed: Date) {
+		storage.set(StorageKey.watermark, String(confirmed.timeIntervalSince1970))
+	}
+
 	/// The time offline evaluation should trust.
 	///
 	/// Offline expiry checks read the system clock, and a user can set it back — which

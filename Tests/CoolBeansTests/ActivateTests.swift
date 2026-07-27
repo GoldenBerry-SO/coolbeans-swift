@@ -11,7 +11,7 @@ final class ActivateTests: XCTestCase {
 			configuration: .init(product: "clementine", baseURL: URL(string: "https://x.test")!),
 			storage: store,
 			transport: StubTransport { _, _ in
-				(200, #"{"ok":true,"license":{"key":"CLEM-A2B3-C4D5-E6F7-G8H9","status":"active","tier":"yearly","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#)
+				(200, #"{"ok":true,"license":{"key":"CLEM-A2B3-C4D5-E6F7-G8H9","status":"active","kind":"subscription","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#)
 			}
 		)
 		let result = try await client.activate(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9", name: "Mac")
@@ -26,7 +26,7 @@ final class ActivateTests: XCTestCase {
 			configuration: .init(product: "clementine", baseURL: URL(string: "https://x.test")!),
 			storage: InMemoryStorage(),
 			transport: StubTransport { _, _ in
-				(200, #"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"somebody-else","expires_at":null},"instance":{"id":"i","name":"n"}}"#)
+				(200, #"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"somebody-else","expires_at":null},"instance":{"id":"i","name":"n"}}"#)
 			}
 		)
 		do {

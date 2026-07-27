@@ -76,4 +76,8 @@ enum StorageKey {
 	static let keys = "coolbeans.pubkeys"
 	static let license = "coolbeans.license_key"
 	static let watermark = "coolbeans.trusted_time"
+	/// Set when a fetched answer said `disabled`. Revocation erases the token, and without this
+	/// the next offline launch would call a revoked licence "uninitialized" and ask for a key
+	/// that already exists.
+	static let revoked = "coolbeans.revoked"
 }

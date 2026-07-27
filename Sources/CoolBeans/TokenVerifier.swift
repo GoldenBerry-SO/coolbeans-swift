@@ -12,9 +12,13 @@ import Crypto
 struct TokenPayload: Decodable {
 	let key: String
 	let status: String
-	let tier: String
+	let kind: String
+	let plan: String?
 	let product: String
 	let expiresAt: String?
+	/// What this licence buys, when the vendor priced capabilities. Absent when it has none, so
+	/// an app checking one is told the truth rather than handed an empty map.
+	let entitlements: [String: EntitlementValue]?
 	/// Present only on an offline activation: the machine it was minted for.
 	let fingerprint: String?
 	let instanceId: String
@@ -22,7 +26,7 @@ struct TokenPayload: Decodable {
 	let exp: Int
 
 	enum CodingKeys: String, CodingKey {
-		case key, status, tier, product, iat, exp
+		case key, status, kind, plan, product, iat, exp, entitlements
 		case expiresAt = "expires_at"
 		case fingerprint
 		case instanceId = "instance_id"

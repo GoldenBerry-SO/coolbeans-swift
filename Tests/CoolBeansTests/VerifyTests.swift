@@ -18,7 +18,7 @@ final class VerifyTests: XCTestCase {
 	}
 
 	private static let ok =
-		#"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"token":"fresh.token.value"}"#
+		#"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"clementine","expires_at":null},"token":"fresh.token.value"}"#
 
 	func testActiveRefreshesTheCachedToken() async throws {
 		let (cb, store) = make { _, _ in (200, Self.ok) }
@@ -56,7 +56,7 @@ final class VerifyTests: XCTestCase {
 
 	func testAProductMismatchIsInconclusiveNotSuccess() async throws {
 		let (cb, store) = make { _, _ in
-			(200, #"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"other","expires_at":null},"token":"t"}"#)
+			(200, #"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"other","expires_at":null},"token":"t"}"#)
 		}
 		let result = try await cb.verify(licenseKey: "K", instanceId: "i")
 		XCTAssertTrue(result.inconclusive)
@@ -68,7 +68,7 @@ final class VerifyTests: XCTestCase {
 		// The only path that takes access away. It must clear the cached token, or the
 		// app would keep unlocking offline after being revoked.
 		let (cb, store) = make { _, _ in
-			(200, #"{"ok":true,"license":{"key":"K","status":"disabled","tier":"yearly","product":"clementine","expires_at":null}}"#)
+			(200, #"{"ok":true,"license":{"key":"K","status":"disabled","kind":"subscription","product":"clementine","expires_at":null}}"#)
 		}
 		let result = try await cb.verify(licenseKey: "K", instanceId: "i")
 		XCTAssertFalse(result.valid)

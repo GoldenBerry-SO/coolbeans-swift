@@ -66,11 +66,29 @@ final class LicenseGateTests: XCTestCase {
 		XCTAssertEqual(g.status, .active)
 	}
 
+	func testTheGateHearsAVerdictThatChangesInTheBackground() async throws {
+		// The gate calls open() once. Everything after that arrives through onChange, so without
+		// registering one a SwiftUI app never notices a revocation until it is relaunched — which is
+		// the whole reason the SDK keeps checking.
+		let signed = try TestSigner.sign(.init(exp: now.addingTimeInterval(3600)))
+		let g = gate(token: signed.token, keys: signed.keys) { _, _ in (-1, "") }
+		await g.refresh()
+		XCTAssertTrue(g.isUnlocked)
+
+		// What the upkeep loop would hand back on a fetched revocation.
+		let revoked = AccessState(
+			decision: .deny, reason: .revoked, license: nil, expiresAt: nil, entitlements: nil)
+		g.apply(revoked)
+		XCTAssertEqual(g.status, .revoked)
+		XCTAssertFalse(g.isUnlocked)
+		XCTAssertEqual(g.access?.reason, .revoked)
+	}
+
 	func testAnExplicitDisableLocksTheApp() async throws {
 		let signed = try TestSigner.sign(.init(exp: now.addingTimeInterval(3600)))
 		let g = gate(token: signed.token, keys: signed.keys) { path, _ in
 			if path == "/v1/pubkey" { return (200, #"{"ok":true,"keys":{}}"#) }
-			return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","tier":"yearly","product":"clementine","expires_at":null}}"#)
+			return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","kind":"subscription","product":"clementine","expires_at":null}}"#)
 		}
 		await g.refresh(licenseKey: "K")
 		XCTAssertFalse(g.isUnlocked)

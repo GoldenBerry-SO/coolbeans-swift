@@ -15,13 +15,54 @@ let cb = CoolBeans(configuration: .init(
   publicKeys: ["1": "BASE64_PUBLIC_KEY"]   // embed these at build time
 ))
 
-// Once, when the user pastes their key. The key is stored, so later launches can
-// verify without you holding on to it.
-let result = try await cb.activate(licenseKey: key, name: "Chris's MacBook")
+// On launch, and again whenever the user pastes a key. This is the whole integration.
+let state = await cb.open(licenseKey: key) { next in
+  if next.decision == .deny { lockOut(next) }   // fires when the verdict changes later
+}
+if state.decision == .deny { lockOut(state) } else { unlock() }
 
-// On every launch — instant, no network
-if await cb.verifyOffline() { unlock() }
+// On shutdown
+cb.stop()
 ```
+
+`open()` activates on first run, validates after that, and falls back to the cached signed
+token when the network is gone. There is no instance id to hold and no verify-or-verifyOffline
+choice to get wrong. The key is stored, so later launches can call `await cb.open()` with
+nothing in hand.
+
+## The verdict
+
+```swift
+state.decision   // .allow | .deny
+state.reason     // .online .cached .grace .clockRollback | .revoked .expired .uninitialized
+state.license    // the frozen §9 object, for display only
+state.entitlements
+```
+
+Branch on `decision`. Nothing else. `reason` is for what you say to the user: `.grace` means
+nudge them online, `.uninitialized` means ask for a key, `.revoked` means the licence is gone.
+
+A decision plus a reason rather than a boolean, because "we have never established an
+entitlement" and "you were revoked" are different screens, and a boolean loses that.
+
+Every inconclusive answer — offline, a 5xx, a timeout, an unknown key — keeps the last
+known-good state. Only a fetched `disabled` or a signed expiry in the past denies.
+
+These names are the same strings the TypeScript SDK uses, and both SDKs run the same shared
+contract fixtures (`Tests/CoolBeansTests/access-states.json`, copied from the coolbeans repo).
+If the two ever disagree about who keeps working, a test fails.
+
+## Gating features
+
+```swift
+if state.isEntitled("export_4k") { enableExport4k() }
+let batchLimit = state.limit("batch_limit") ?? 1
+```
+
+Entitlements are authored on the server and signed into the token, which is what makes them
+safe here. `license.plan` is a label a vendor types and `license.kind` is our lifecycle
+bookkeeping: both are display only, and `if plan == "Pro"` breaks the day somebody renames a
+tier.
 
 ## Where the public key comes from
 
@@ -33,19 +74,21 @@ Keys fetched later from `/v1/pubkey` are merged with the embedded ones so a serv
 rotation does not need an app update. **Embedded keys are never displaced** — they are the
 trust anchor that shipped inside your signed binary.
 
-## How often to check
+## What `open()` does after it returns
 
-Verify once on launch, then roughly every TTL/3 to TTL/2 — daily on the 7-day default,
-which gives two or three chances to reconnect before a user drifts into grace. Add jitter
-so every install does not wake on the same tick.
+It keeps itself fresh, so there is no cadence for you to pick:
 
-Floating products heartbeat at about a third of the lease window, so one dropped request
-does not cost the user their seat. Node-locked products should never call `heartbeat`.
+- **Re-checks on its own**, at a third of the token's lifetime, jittered so every install of your
+  app does not wake on the same tick. A changed verdict arrives through `onChange:`.
+- **Holds a floating seat itself**, on the cadence the server's own lease implies — about a third
+  of the window, so one dropped beat does not cost the user their seat. A node-locked product
+  returns no lease and nothing further is scheduled, so there is no seat model to branch on.
+- `cb.stop()` cancels both, for app shutdown. `await cb.release()` gives the seat back on sign-out
+  and returns false if it could not reach us, so you know to retry.
 
-**Do not** verify on every feature use or window focus — that is what the cached token is
-for, and it turns a network blip into visible flakiness. **Do not** block app startup on
-`verify()`; gate your UI on `verifyOffline()`, which is instant, and let the online check
-settle behind it. **Do not** treat a failed check as a reason to do anything abrupt.
+**Do not** call `open()` on every feature use or window focus — that is what the cached token is
+for, and it turns a network blip into visible flakiness. **Do not** treat a failed check as a
+reason to do anything abrupt: it already resolved to the last good state.
 
 ## The three offline states
 

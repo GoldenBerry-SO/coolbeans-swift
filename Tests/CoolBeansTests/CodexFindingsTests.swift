@@ -95,7 +95,7 @@ final class CredentialPersistenceTests: XCTestCase {
 			configuration: .init(product: "clementine"),
 			storage: store,
 			transport: StubTransport { _, _ in
-				(200, #"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"instance":{"id":"i","name":"n"}}"#)
+				(200, #"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"clementine","expires_at":null},"instance":{"id":"i","name":"n"}}"#)
 			})
 		_ = try await cb.activate(licenseKey: "CLEM-A2B3-C4D5-E6F7-G8H9", name: "Mac")
 		XCTAssertEqual(cb.licenseKey, "CLEM-A2B3-C4D5-E6F7-G8H9")
@@ -116,7 +116,7 @@ final class CredentialPersistenceTests: XCTestCase {
 			transport: StubTransport { path, _ in
 				if path == "/v1/validate" { validateCalls.bump() }
 				if path == "/v1/pubkey" { return (200, #"{"ok":true,"keys":{}}"#) }
-				return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","tier":"yearly","product":"clementine","expires_at":null}}"#)
+				return (200, #"{"ok":true,"license":{"key":"K","status":"disabled","kind":"subscription","product":"clementine","expires_at":null}}"#)
 			})
 		let gate = LicenseGate(client: cb)
 		await gate.refresh()
@@ -160,7 +160,7 @@ final class StorageFailureTests: XCTestCase {
 			transport: StubTransport { _, _ in
 				(
 					200,
-					#"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#
+					#"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"clementine","expires_at":null},"instance":{"id":"inst-1","name":"Mac"}}"#
 				)
 			})
 		do {
@@ -244,7 +244,7 @@ final class PartialWriteTests: XCTestCase {
 			transport: StubTransport { _, _ in
 				(
 					200,
-					#"{"ok":true,"license":{"key":"K","status":"active","tier":"yearly","product":"clementine","expires_at":null},"instance":{"id":"inst-new","name":"Mac"}}"#
+					#"{"ok":true,"license":{"key":"K","status":"active","kind":"subscription","product":"clementine","expires_at":null},"instance":{"id":"inst-new","name":"Mac"}}"#
 				)
 			})
 		return (cb, store, new.token)

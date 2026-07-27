@@ -31,6 +31,8 @@ public final class CoolBeans: @unchecked Sendable {
 	let storage: CoolBeansStorage
 	let transport: CoolBeansTransport
 	private let clock: @Sendable () -> Date
+	/// The background refresh and seat loops `open()` starts and `stop()` cancels.
+	let upkeep = Upkeep()
 	private let deviceLock = NSLock()
 	private var resolvedFingerprint: String?
 
@@ -114,6 +116,11 @@ public final class CoolBeans: @unchecked Sendable {
 				code: "storage_failed",
 				message: "Your licence could not be saved on this device. Check Keychain access and try again.")
 		}
+		// A new seat reopens the lease question: whatever we last concluded was about the old one.
+		// Here rather than in open()'s helper, because an app that calls activate itself has taken
+		// a fresh seat just the same, and a stale "nothing to renew" would lose it.
+		upkeep.leaseCadence = nil
+		upkeep.leaseKnown = false
 		return ActivateResult(license: payload.license, instance: payload.instance)
 	}
 

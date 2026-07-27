@@ -27,6 +27,12 @@ let package = Package(
 			]
 		),
 		.executableTarget(name: "coolbeans-example", dependencies: ["CoolBeans"]),
-		.testTarget(name: "CoolBeansTests", dependencies: ["CoolBeans"]),
+		.testTarget(
+			name: "CoolBeansTests",
+			dependencies: ["CoolBeans"],
+			// The access-state contract, copied verbatim from the coolbeans repo. Both SDKs run
+			// every case in it, so neither can drift on which states deny and which keep access.
+			resources: [.copy("access-states.json")]
+		),
 	]
 )

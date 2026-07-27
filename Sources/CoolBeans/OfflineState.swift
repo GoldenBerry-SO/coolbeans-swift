@@ -10,41 +10,13 @@ extension CoolBeans {
 	}
 
 	/// Detailed offline state. Performs no network call, ever.
+	///
+	/// The three states are a projection of the same table `open()` reads, deliberately: two
+	/// copies of the offline decision rules is two chances to lock somebody out.
 	public func offlineState() async -> OfflineState {
-		guard let token = storage.get(StorageKey.token) else { return .expired }
-
-		// Fail closed with no trusted key. A caller who has never been online has nothing
-		// to check a signature against, and unlocking there would make the token pointless.
-		let keys = trustedKeys()
-		guard !keys.isEmpty, let payload = TokenVerifier.verify(token, keys: keys) else {
-			return .expired
-		}
-
-		// Claim binding: this token must be for this product and this device.
-		guard payload.product == configuration.product else { return .expired }
-		if let bound = storage.get(StorageKey.instance), payload.instanceId != bound {
-			return .expired
-		}
-		guard payload.status != "disabled" else { return .expired }
-
-		let now = effectiveNow()
-
-		// A signed expiry that has passed is definitive, whatever the tier. The token we
-		// were issued says this licence ended, so honouring it is reading our own
-		// credential rather than inferring revocation from a network failure — §8 is
-		// untouched, and it is what makes revocation reach a machine that has gone dark.
-		// Lifetime licences carry no expires_at and are unaffected.
-		if let raw = payload.expiresAt, let expiry = Self.parseDate(raw), expiry <= now {
-			return .expired
-		}
-
-		let tokenExpiry = Date(timeIntervalSince1970: TimeInterval(payload.exp))
-		if payload.tier == "trial" {
-			// Trials get no TTL grace either, or a blocked endpoint becomes an unlimited trial.
-			return tokenExpiry > now ? .valid : .expired
-		}
-		// Past the TTL on a licence that has not expired: grace, never a lockout.
-		return tokenExpiry > now ? .valid : .grace
+		let (state, withinTtl) = await offlineVerdict()
+		if state.decision == .deny { return .expired }
+		return withinTtl ? .valid : .grace
 	}
 
 	/// Every key this app trusts: the ones embedded at build time, plus any persisted from
