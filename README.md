@@ -3,9 +3,26 @@
 Licence checks for macOS and iOS apps. Activate a device, verify online, and keep working
 with no network at all. No service secret in the client — the key is the credential.
 
+## Installation
+
+Swift Package Manager:
+
 ```swift
 .package(url: "https://github.com/GoldenBerry-SO/coolbeans-swift.git", from: "0.1.0")
 ```
+
+Add the `CoolBeans` product to your target:
+
+```swift
+.target(name: "YourApp", dependencies: [.product(name: "CoolBeans", package: "coolbeans-swift")])
+```
+
+In Xcode: File ▸ Add Package Dependencies, paste the URL above, and add the `CoolBeans`
+library to your app target.
+
+Requires macOS 11 or iOS 14, at minimum.
+
+## Quick start
 
 ```swift
 import CoolBeans
@@ -29,6 +46,30 @@ cb.stop()
 token when the network is gone. There is no instance id to hold and no verify-or-verifyOffline
 choice to get wrong. The key is stored, so later launches can call `await cb.open()` with
 nothing in hand.
+
+## Configuration
+
+Four things, all on `Configuration`:
+
+- **`product`**: the product slug from the Cool Beans console. `activate` and `verify` fail
+  closed if the server ever answers for a different one.
+- **`baseURL`**: defaults to `https://app.coolbeans.tools`. Override it to point at a
+  self-hosted instance, or at a local server while you build against the SDK: that is what
+  `coolbeans-example` and `Examples/MacExample` both do, via the `COOLBEANS_URL` environment
+  variable.
+- **`publicKeys`**: Ed25519 public keys keyed by `kid`, embedded at build time. See
+  "Where the public key comes from" below.
+- **`syncsViaICloud`**: whether Keychain items sync to the user's other devices. Off by
+  default. See "Keychain and iCloud" below.
+
+```swift
+CoolBeans(configuration: .init(
+  product: "clementine",
+  baseURL: URL(string: "https://app.coolbeans.tools")!,
+  publicKeys: ["1": "BASE64_PUBLIC_KEY"],
+  syncsViaICloud: false
+))
+```
 
 ## The verdict
 
@@ -89,6 +130,21 @@ It keeps itself fresh, so there is no cadence for you to pick:
 **Do not** call `open()` on every feature use or window focus — that is what the cached token is
 for, and it turns a network blip into visible flakiness. **Do not** treat a failed check as a
 reason to do anything abrupt: it already resolved to the last good state.
+
+## Threading
+
+`CoolBeans` is `Sendable` and safe to call from anywhere at once. Its own lock guards the
+device fingerprint, and the background refresh and seat loops run as independent tasks so
+`stop()` can cancel them synchronously from any thread, including a SwiftUI teardown.
+
+`onChange` (passed to `open()`) fires from that background task, not necessarily the main
+actor. Hop to `@MainActor` yourself before touching UI state from it. `LicenseGate` does
+exactly this internally, which is why it is safe to observe from a view with no extra hopping
+of your own (see "LicenseGate for SwiftUI" below).
+
+A custom `CoolBeansStorage` can be called from more than one task at once, since the launch
+check and the background upkeep loop both read and write it. Guard its state the way
+`KeychainStorage` and `InMemoryStorage` do.
 
 ## The three offline states
 
@@ -187,6 +243,108 @@ catch let error as CoolBeansError {
 }
 ```
 
+## Calling the pieces directly
+
+`open()` is the call to make in an app. The pieces underneath are public too, for a CLI
+tool, a diagnostics screen, or your own tests. This is what `coolbeans-example` runs end to
+end:
+
+```swift
+let cb = CoolBeans(configuration: .init(product: "clementine", publicKeys: keys))
+
+let activated = try await cb.activate(licenseKey: key)
+print(activated.instance.id, activated.license.kind)
+
+let verified = try await cb.verify(licenseKey: key, instanceId: activated.instance.id)
+print(verified.valid, verified.inconclusive)
+
+let offline = await cb.offlineState()   // .valid, .grace, or .expired: no network, ever
+print(offline)
+
+try await cb.deactivate(licenseKey: key, instanceId: activated.instance.id)
+```
+
+`verifyOffline()` is the same offline check collapsed to a bool, for a launch-time gate that
+only needs yes or no:
+
+```swift
+if await cb.verifyOffline() { unlock() }
+```
+
+Prefer `open()` when you can. It runs these same calls plus the fallback and upkeep logic
+as one tested unit, so there is no step to miss.
+
+## LicenseGate for SwiftUI
+
+`LicenseGate` wraps `CoolBeans` for a SwiftUI app: hold one, call `refresh()` on launch, and
+read `isUnlocked`. It conforms to `ObservableObject` wherever Combine exists, and carries a
+plain `onChange` closure everywhere else, including Linux. That portable hook is what keeps
+the decision logic behind the example app's UI testable off a Mac.
+
+```swift
+@StateObject private var gate = LicenseGate(client: CoolBeans(configuration: .init(
+  product: "clementine",
+  publicKeys: ["1": "BASE64_PUBLIC_KEY"]
+)))
+
+var body: some Scene {
+  WindowGroup {
+    ContentView(gate: gate)
+      // Gate on the cached token, which is instant. Blocking the window on a network call is
+      // how an app comes to feel broken on a bad connection.
+      .task { await gate.refresh() }
+  }
+}
+```
+
+```swift
+struct ContentView: View {
+  @ObservedObject var gate: LicenseGate
+
+  var body: some View {
+    if gate.isUnlocked {
+      // gate.status == .grace means we haven't checked in a while: unlock, and mention it
+      // quietly or not at all
+    } else {
+      // gate.status == .revoked is the one state worth an error colour
+      // gate.lastError?.message is the server's own sentence, written for a person
+    }
+  }
+}
+```
+
+`gate.activate(licenseKey:name:)` and `gate.deactivate()` wrap the `CoolBeans` calls of the
+same name and map the result onto `LicenseStatus` (`.active`, `.grace`, `.revoked`,
+`.locked`), so a view never reads `AccessState` directly. `gate.deviceFingerprint` is what
+an air-gapped activation needs (see "Offline activation" above).
+
+This is optional: the raw `CoolBeans` verdict works just as well on its own. `LicenseGate`
+exists because the logic behind `Examples/MacExample`'s UI needed to be testable off a
+device.
+
+## Testing your integration
+
+`CoolBeansTransport` and `CoolBeansStorage` are the two seams. Swap `URLSessionTransport`
+for a `StubTransport` (canned responses, keyed on path and request body) and the
+Keychain-backed default for `InMemoryStorage`, and a test drives the whole decision table
+with no network and no device Keychain:
+
+```swift
+let transport = StubTransport { path, _ in
+  path == "/v1/activate"
+    ? (200, #"{"ok":true,"license":{"key":"K","status":"active","kind":"perpetual","product":"clementine","expires_at":null},"instance":{"id":"i","name":"n"}}"#)
+    : (200, #"{"ok":true}"#)
+}
+let cb = CoolBeans(
+  configuration: .init(product: "clementine"),
+  storage: InMemoryStorage(),
+  transport: transport)
+```
+
+This is exactly how the SDK's own suite drives every case in
+`Tests/CoolBeansTests/access-states.json`, the contract fixture this SDK and the TypeScript
+one both run so they cannot quietly disagree about who keeps working.
+
 ## Distribution
 
 This targets **direct distribution** — notarised, outside the App Store. On the App Store
@@ -196,7 +354,8 @@ Apple owns purchase and receipt validation and you would not use this for those 
 
 **`Examples/MacExample`** is a licence-gated SwiftUI app for macOS — key entry, activation,
 gated content, the offline state shown honestly, and the device fingerprint an operator
-needs for an air-gapped activation. It is the thing to copy.
+needs for an air-gapped activation. It is the thing to copy, and it is what "LicenseGate for
+SwiftUI" above walks through.
 
 All of its decisions live in `LicenseGate`, which is plain Swift and covered by tests. The
 SwiftUI file is presentation only. Logic that lives in a view is logic nobody can test.
@@ -219,3 +378,23 @@ Activates, verifies, prints the offline state and frees the seat.
 macOS 11+, iOS 14+. Ed25519 uses the system CryptoKit on Apple platforms. On Linux —
 where the test suite runs in CI — Apple's source-compatible `swift-crypto` is linked
 instead, so the whole decision table is tested on every push rather than only on a Mac.
+
+## Development
+
+```bash
+swift test
+```
+
+runs the full suite (69 tests) with no network and no Apple-only dependency: `InMemoryStorage`
+stands in for the Keychain, which is what lets the whole decision table run on Linux too. CI
+(`.github/workflows/ci.yml`) runs that suite on a `swift:6.0` Linux container, plus a macOS
+job that additionally builds the Keychain/IOKit-backed pieces, the iOS target, and
+`Examples/MacExample`. SwiftUI and AppKit exist nowhere else, so that macOS job is the only
+place the example app is ever compiled, which keeps it from rotting silently.
+
+There is no separate lint or format step. Every source file opens with two `// ABOUTME:`
+comment lines; match that when you add one.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
